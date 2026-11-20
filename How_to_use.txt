@@ -1,0 +1,5 @@
+A biblioteca do Python:
+pip install flask
+python app.py
+
+

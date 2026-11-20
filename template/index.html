@@ -1,0 +1,63 @@
+
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ESP32 Music Player</title>
+    <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+
+<main class="player">
+
+    <h1>ESP32 Music Player</h1>
+    <p>Seu player de música local</p>
+
+    <label class="upload">
+        + Adicionar músicas
+        <input type="file" id="files" accept="audio/*" multiple hidden>
+    </label>
+
+    <section class="current">
+        <div class="cover">♫</div>
+
+        <h2 id="title">Nenhuma música</h2>
+        <p id="filename">Selecione um arquivo</p>
+
+        <audio id="audio"></audio>
+
+        <input type="range" id="progress"
+               min="0" max="100" value="0">
+
+        <div class="times">
+            <span id="currentTime">00:00</span>
+            <span id="duration">00:00</span>
+        </div>
+
+        <div class="controls">
+            <button id="previous">⏮</button>
+            <button id="play">▶</button>
+            <button id="next">⏭</button>
+        </div>
+
+        <label>Volume
+            <input type="range" id="volume"
+                   min="0" max="1" step="0.01" value="0.7">
+        </label>
+
+        <div class="metadata">
+            <p>Formato: <span id="format">-</span></p>
+            <p>Tamanho: <span id="size">-</span></p>
+            <p>Duração: <span id="durationInfo">-</span></p>
+        </div>
+    </section>
+
+    <h3>Playlist</h3>
+    <ul id="playlist"></ul>
+
+</main>
+
+<script src="/script.js"></script>
+</body>
+</html>
