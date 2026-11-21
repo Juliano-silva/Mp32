@@ -16,8 +16,8 @@
 #define OLED_RESET -1
 #define OLED_ADDRESS 0x3C
 
-#define OLED_SDA 21
-#define OLED_SCL 22
+#define OLED_SDA 33
+#define OLED_SCL 32
 
 Adafruit_SSD1306 display(
   SCREEN_WIDTH,
@@ -30,7 +30,11 @@ Adafruit_SSD1306 display(
 // BLUETOOTH
 // =====================================
 
-BluetoothA2DPSink a2dp_sink;
+class SilentA2DPSink : public BluetoothA2DPSink {
+public:
+  SilentA2DPSink() { is_output = false; }
+};
+SilentA2DPSink a2dp_sink;
 
 // =====================================
 // INFORMACOES DA MUSICA
@@ -40,13 +44,18 @@ char musicTitle[100] = "Aguardando musica";
 char musicArtist[70] = "Desconhecido";
 char musicAlbum[70] = "";
 
+bool metadataReceived = false;
+unsigned long lastMetadataRequest = 0;
+
 uint32_t durationMs = 0;
 uint32_t positionMs = 0;
 
 bool bluetoothConnected = false;
 bool isPlaying = false;
+bool serialMetadataActive = false;
 
 unsigned long lastDisplayUpdate = 0;
+unsigned long lastPositionTick = 0;
 
 // =====================================
 // FORMATAR TEMPO
@@ -73,14 +82,20 @@ void metadataCallback(uint8_t id, const uint8_t *text) {
 
   if (text == nullptr) return;
 
+  metadataReceived = true;
+
+  Serial.printf("AVRC meta id=0x%x len=%u text=%s\n", id, (unsigned)strlen((const char*)text), (const char*)text);
+
   const char *value = (const char *)text;
 
   switch (id) {
 
     case ESP_AVRC_MD_ATTR_TITLE:
 
-      strncpy(musicTitle, value, sizeof(musicTitle) - 1);
-      musicTitle[sizeof(musicTitle) - 1] = '\0';
+      if (value[0] != '\0') {
+        strncpy(musicTitle, value, sizeof(musicTitle) - 1);
+        musicTitle[sizeof(musicTitle) - 1] = '\0';
+      }
 
       Serial.printf("Titulo: %s\n", musicTitle);
 
@@ -88,8 +103,10 @@ void metadataCallback(uint8_t id, const uint8_t *text) {
 
     case ESP_AVRC_MD_ATTR_ARTIST:
 
-      strncpy(musicArtist, value, sizeof(musicArtist) - 1);
-      musicArtist[sizeof(musicArtist) - 1] = '\0';
+      if (value[0] != '\0') {
+        strncpy(musicArtist, value, sizeof(musicArtist) - 1);
+        musicArtist[sizeof(musicArtist) - 1] = '\0';
+      }
 
       Serial.printf("Artista: %s\n", musicArtist);
 
@@ -97,8 +114,10 @@ void metadataCallback(uint8_t id, const uint8_t *text) {
 
     case ESP_AVRC_MD_ATTR_ALBUM:
 
-      strncpy(musicAlbum, value, sizeof(musicAlbum) - 1);
-      musicAlbum[sizeof(musicAlbum) - 1] = '\0';
+      if (value[0] != '\0') {
+        strncpy(musicAlbum, value, sizeof(musicAlbum) - 1);
+        musicAlbum[sizeof(musicAlbum) - 1] = '\0';
+      }
 
       Serial.printf("Album: %s\n", musicAlbum);
 
@@ -106,7 +125,9 @@ void metadataCallback(uint8_t id, const uint8_t *text) {
 
     case ESP_AVRC_MD_ATTR_PLAYING_TIME:
 
-      durationMs = strtoul(value, nullptr, 10);
+      if (value[0] != '\0') {
+        durationMs = strtoul(value, nullptr, 10);
+      }
 
       Serial.printf("Duracao: %lu ms\n", durationMs);
 
@@ -125,6 +146,7 @@ void playbackCallback(esp_avrc_playback_stat_t status) {
     case ESP_AVRC_PLAYBACK_PLAYING:
 
       isPlaying = true;
+      lastPositionTick = millis();
       Serial.println("PLAYING");
 
       break;
@@ -132,6 +154,7 @@ void playbackCallback(esp_avrc_playback_stat_t status) {
     case ESP_AVRC_PLAYBACK_PAUSED:
 
       isPlaying = false;
+      lastPositionTick = 0;
       Serial.println("PAUSED");
 
       break;
@@ -140,6 +163,7 @@ void playbackCallback(esp_avrc_playback_stat_t status) {
 
       isPlaying = false;
       positionMs = 0;
+      lastPositionTick = 0;
 
       Serial.println("STOPPED");
 
@@ -166,6 +190,13 @@ void positionCallback(uint32_t position) {
 void connectionCallback(bool connected) {
 
   bluetoothConnected = connected;
+
+  if (connected) {
+    metadataReceived = false;
+    serialMetadataActive = false;
+    lastMetadataRequest = millis();
+    lastPositionTick = 0;
+  }
 
   Serial.println(
     connected
@@ -338,6 +369,10 @@ void setup() {
 
   a2dp_sink.start("ESP32 MUSIC PLAYER");
 
+  // Este dispositivo so exibe metadados: desativa saida de audio
+  // para evitar bloqueio da tarefa Bluetooth (watchdog).
+  a2dp_sink.set_output_active(false);
+
   Serial.println();
   Serial.println("============================");
   Serial.println("ESP32 MUSIC PLAYER");
@@ -349,7 +384,93 @@ void setup() {
 // LOOP
 // =====================================
 
+void handleSerialCommand(const String &command) {
+
+  if (!command.startsWith("META|")) return;
+
+  String payload = command.substring(5);
+
+  int firstSep = payload.indexOf('|');
+  int secondSep = payload.indexOf('|', firstSep + 1);
+
+  String title = firstSep >= 0
+    ? payload.substring(0, firstSep)
+    : payload;
+
+  String artist = (firstSep >= 0 && secondSep >= 0)
+    ? payload.substring(firstSep + 1, secondSep)
+    : "Desconhecido";
+
+  String duration = secondSep >= 0
+    ? payload.substring(secondSep + 1)
+    : "0";
+
+  if (title.length() == 0) title = "Sem titulo";
+  if (artist.length() == 0) artist = "Desconhecido";
+
+  strncpy(musicTitle, title.c_str(), sizeof(musicTitle) - 1);
+  musicTitle[sizeof(musicTitle) - 1] = '\0';
+
+  strncpy(musicArtist, artist.c_str(), sizeof(musicArtist) - 1);
+  musicArtist[sizeof(musicArtist) - 1] = '\0';
+
+  durationMs = (uint32_t)duration.toInt();
+  positionMs = 0;
+  isPlaying = true;
+  serialMetadataActive = true;
+  lastPositionTick = millis();
+
+  Serial.printf("Serial metadata: %s - %s\n", musicTitle, musicArtist);
+}
+
 void loop() {
+
+  while (Serial.available()) {
+
+    static String serialBuffer;
+
+    char c = (char)Serial.read();
+
+    if (c == '\n') {
+
+      serialBuffer.trim();
+
+      if (serialBuffer.length() > 0) {
+        handleSerialCommand(serialBuffer);
+      }
+
+      serialBuffer = "";
+
+    } else if (c != '\r') {
+
+      serialBuffer += c;
+    }
+  }
+
+  if (serialMetadataActive && isPlaying) {
+    unsigned long now = millis();
+    if (lastPositionTick == 0) {
+      lastPositionTick = now;
+    } else {
+      unsigned long delta = now - lastPositionTick;
+      lastPositionTick = now;
+      if (durationMs > 0 && positionMs + delta >= durationMs) {
+        positionMs = durationMs;
+        isPlaying = false;
+        serialMetadataActive = false;
+      } else {
+        positionMs += (uint32_t)delta;
+      }
+    }
+  }
+
+  if (!bluetoothConnected && !serialMetadataActive) {
+    if (isPlaying || positionMs != 0) {
+      isPlaying = false;
+      positionMs = 0;
+      lastPositionTick = 0;
+    }
+  }
 
   if (millis() - lastDisplayUpdate >= 500) {
 

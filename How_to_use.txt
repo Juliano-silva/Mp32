@@ -1,5 +1,5 @@
 A biblioteca do Python:
-pip install flask
-python app.py
+pip install flask yt-dlp spotipy requests
+python main.py
 
 

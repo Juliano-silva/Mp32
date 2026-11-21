@@ -5,7 +5,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>ESP32 Music Player</title>
-    <link rel="stylesheet" href="/style.css">
+    <link rel="stylesheet" href="../static/style.css">
 </head>
 <body>
 
@@ -18,6 +18,12 @@
         + Adicionar músicas
         <input type="file" id="files" accept="audio/*" multiple hidden>
     </label>
+
+    <section class="link-add">
+        <input type="url" id="linkInput" placeholder="Cole um link do YouTube ou Spotify">
+        <button id="addLink" type="button">Adicionar link</button>
+        <span id="linkStatus"></span>
+    </section>
 
     <section class="current">
         <div class="cover">♫</div>
@@ -58,6 +64,6 @@
 
 </main>
 
-<script src="/script.js"></script>
+<script src="../static/script.js"></script>
 </body>
 </html>

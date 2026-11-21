@@ -33,8 +33,13 @@ filesInput.addEventListener("change", (event) => {
         if (!file.type.startsWith("audio/")) return;
 
         tracks.push({
-            file,
-            url: URL.createObjectURL(file)
+            source: "local",
+            name: file.name,
+            title: file.name.replace(/\\.[^/.]+$/, ""),
+            artist: "Arquivo local",
+            url: URL.createObjectURL(file),
+            size: file.size,
+            format: file.name.split(".").pop().toUpperCase()
         });
     });
 
@@ -52,12 +57,12 @@ function renderPlaylist() {
 
     tracks.forEach((track, index) => {
         const li = document.createElement("li");
-
-        li.textContent = `${index + 1}. ${track.file.name}`;
+        li.textContent = `${index + 1}. ${track.title || track.name}`;
 
         if (index === currentIndex) {
             li.classList.add("active");
         }
+
 
         li.addEventListener("click", () => loadTrack(index));
 
@@ -71,20 +76,23 @@ function loadTrack(index) {
     currentIndex = index;
 
     const track = tracks[index];
-    const file = track.file;
 
     audio.src = track.url;
 
     titleElement.textContent =
-        file.name.replace(/\.[^/.]+$/, "");
+        track.title || track.name || "Sem título";
 
-    filenameElement.textContent = file.name;
+    filenameElement.textContent =
+        track.name || track.url || "-";
 
     document.getElementById("size").textContent =
-        formatSize(file.size);
+        track.size ? formatSize(track.size) : "-";
 
     document.getElementById("format").textContent =
-        file.name.split(".").pop().toUpperCase();
+        track.format || (track.source ? track.source.toUpperCase() : "-");
+
+    updateMediaSession();
+    notifyEsp32();
 
     audio.play().then(() => {
         playButton.textContent = "⏸";
@@ -93,7 +101,6 @@ function loadTrack(index) {
     });
 
     renderPlaylist();
-    updateMediaSession();
 }
 
 playButton.addEventListener("click", () => {
@@ -124,6 +131,7 @@ audio.addEventListener("loadedmetadata", () => {
     progress.max = audio.duration || 0;
 
     updateMediaSession();
+    notifyEsp32();
 });
 
 audio.addEventListener("timeupdate", () => {
@@ -166,13 +174,15 @@ audio.addEventListener("ended", () => {
 function updateMediaSession() {
     if (!("mediaSession" in navigator) || currentIndex < 0) return;
 
-    const file = tracks[currentIndex].file;
+    const track = tracks[currentIndex];
 
     navigator.mediaSession.metadata = new MediaMetadata({
-        title: file.name.replace(/\.[^/.]+$/, ""),
-        artist: "Arquivo local",
-        album: "Minha playlist"
+        title: track.title || track.name || "Sem título",
+        artist: track.artist || "Desconhecido",
+        album: track.album || "Minha playlist",
+        artwork: track.thumbnail ? [{ src: track.thumbnail }] : []
     });
+
 
     navigator.mediaSession.setActionHandler("play", () => audio.play());
     navigator.mediaSession.setActionHandler("pause", () => audio.pause());
@@ -194,5 +204,76 @@ function updatePosition() {
         duration: audio.duration,
         playbackRate: audio.playbackRate,
         position: audio.currentTime
+    });
+}
+
+function notifyEsp32() {
+    if (currentIndex < 0) return;
+    const track = tracks[currentIndex];
+    fetch("/api/notify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+            title: track.title || track.name || "Sem título",
+            artist: track.artist || "Desconhecido",
+            duration: track.duration || audio.duration || 0
+        })
+    }).catch(() => {});
+}
+
+const linkInput = document.getElementById("linkInput");
+const addLinkButton = document.getElementById("addLink");
+const linkStatus = document.getElementById("linkStatus");
+
+if (addLinkButton) {
+    addLinkButton.addEventListener("click", async () => {
+        const url = (linkInput.value || "").trim();
+        if (!url) {
+            linkStatus.textContent = "Informe um link.";
+            return;
+        }
+
+        linkStatus.textContent = "Buscando dados...";
+        addLinkButton.disabled = true;
+
+        try {
+            const response = await fetch("/api/link", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ url })
+            });
+
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Falha ao buscar link.");
+            }
+
+            tracks.push({
+                source: data.source || "link",
+                name: data.title || url,
+                title: data.title || "Sem título",
+                artist: data.artist || "Desconhecido",
+                album: data.album || "",
+                url: data.stream_url || data.webpage_url || url,
+                thumbnail: data.thumbnail || null,
+                size: null,
+                format: data.source ? data.source.toUpperCase() : "LINK",
+                duration: data.duration || null
+            });
+
+            renderPlaylist();
+
+            if (currentIndex === -1 && tracks.length) {
+                loadTrack(tracks.length - 1);
+            }
+
+            linkStatus.textContent = "Adicionado.";
+            linkInput.value = "";
+        } catch (error) {
+            linkStatus.textContent = error.message || "Erro ao adicionar link.";
+            console.error(error);
+        } finally {
+            addLinkButton.disabled = false;
+        }
     });
 }

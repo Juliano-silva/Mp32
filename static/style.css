@@ -123,3 +123,33 @@ button {
 #playlist li.active {
     border: 1px solid #7488ef;
 }
+
+.link-add {
+    display: flex;
+    gap: 8px;
+    margin: 15px 0;
+    align-items: center;
+}
+
+.link-add input {
+    flex: 1;
+    padding: 10px;
+    border-radius: 8px;
+    border: 1px solid #64748b;
+    background: #1b2030;
+    color: white;
+}
+
+.link-add button {
+    padding: 10px 14px;
+    border: none;
+    border-radius: 8px;
+    background: #3b82f6;
+    color: white;
+    cursor: pointer;
+}
+
+#linkStatus {
+    font-size: 12px;
+    color: #aab1c3;
+}
