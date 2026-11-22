@@ -22,6 +22,7 @@
 #define BUTTON_PIN 12
 #define NEXT_BUTTON_PIN 14
 #define PREV_BUTTON_PIN 13
+#define VOLUME_POT_PIN 27
 
 Adafruit_SSD1306 display(
   SCREEN_WIDTH,
@@ -73,6 +74,9 @@ bool prevButtonState = HIGH;
 unsigned long prevLastDebounce = 0;
 unsigned long prevPressStart = 0;
 bool prevHoldTriggered = false;
+
+int lastVolume = -1;
+unsigned long lastVolumeRead = 0;
 
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastPositionTick = 0;
@@ -527,6 +531,19 @@ void loop() {
     }
   }
   prevLastReading = prevReading;
+
+  // Volume por potenciometro no pino 27
+  if (millis() - lastVolumeRead >= 200) {
+    lastVolumeRead = millis();
+    int raw = analogRead(VOLUME_POT_PIN);
+    int volume = map(raw, 0, 4095, 0, 127);
+    if (volume < 0) volume = 0;
+    if (volume > 127) volume = 127;
+    if (abs(volume - lastVolume) > 1) {
+      lastVolume = volume;
+      a2dp_sink.set_volume((uint8_t)volume);
+    }
+  }
 
   while (Serial.available()) {
 
