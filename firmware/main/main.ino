@@ -20,6 +20,8 @@
 #define OLED_SCL 32
 
 #define BUTTON_PIN 12
+#define NEXT_BUTTON_PIN 14
+#define PREV_BUTTON_PIN 13
 
 Adafruit_SSD1306 display(
   SCREEN_WIDTH,
@@ -59,6 +61,18 @@ bool serialMetadataActive = false;
 bool lastButtonReading = HIGH;
 bool buttonState = HIGH;
 unsigned long lastButtonDebounce = 0;
+
+bool nextLastReading = HIGH;
+bool nextButtonState = HIGH;
+unsigned long nextLastDebounce = 0;
+unsigned long nextPressStart = 0;
+bool nextHoldTriggered = false;
+
+bool prevLastReading = HIGH;
+bool prevButtonState = HIGH;
+unsigned long prevLastDebounce = 0;
+unsigned long prevPressStart = 0;
+bool prevHoldTriggered = false;
 
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastPositionTick = 0;
@@ -314,6 +328,8 @@ void setup() {
   Serial.begin(115200);
 
   pinMode(BUTTON_PIN, INPUT_PULLUP);
+  pinMode(NEXT_BUTTON_PIN, INPUT_PULLUP);
+  pinMode(PREV_BUTTON_PIN, INPUT_PULLUP);
 
   Wire.begin(OLED_SDA, OLED_SCL);
 
@@ -453,6 +469,64 @@ void loop() {
     }
   }
   lastButtonReading = reading;
+
+  // Botao NEXT (D14): click = +5s, segurar = proxima faixa
+  bool nextReading = digitalRead(NEXT_BUTTON_PIN);
+  if (nextReading != nextLastReading) {
+    nextLastDebounce = millis();
+  }
+  if ((millis() - nextLastDebounce) > 50) {
+    if (nextReading != nextButtonState) {
+      nextButtonState = nextReading;
+      if (nextButtonState == LOW) {
+        nextPressStart = millis();
+        nextHoldTriggered = false;
+      } else {
+        if (!nextHoldTriggered && bluetoothConnected) {
+          esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_FAST_FORWARD, ESP_AVRC_PT_CMD_STATE_PRESSED);
+          delay(1000);
+          esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_FAST_FORWARD, ESP_AVRC_PT_CMD_STATE_RELEASED);
+        }
+        nextHoldTriggered = false;
+      }
+    }
+  }
+  if (nextButtonState == LOW && !nextHoldTriggered && bluetoothConnected) {
+    if (millis() - nextPressStart >= 600) {
+      a2dp_sink.next();
+      nextHoldTriggered = true;
+    }
+  }
+  nextLastReading = nextReading;
+
+  // Botao PREV (D13): click = -5s, segurar = faixa anterior
+  bool prevReading = digitalRead(PREV_BUTTON_PIN);
+  if (prevReading != prevLastReading) {
+    prevLastDebounce = millis();
+  }
+  if ((millis() - prevLastDebounce) > 50) {
+    if (prevReading != prevButtonState) {
+      prevButtonState = prevReading;
+      if (prevButtonState == LOW) {
+        prevPressStart = millis();
+        prevHoldTriggered = false;
+      } else {
+        if (!prevHoldTriggered && bluetoothConnected) {
+          esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_REWIND, ESP_AVRC_PT_CMD_STATE_PRESSED);
+          delay(1000);
+          esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_REWIND, ESP_AVRC_PT_CMD_STATE_RELEASED);
+        }
+        prevHoldTriggered = false;
+      }
+    }
+  }
+  if (prevButtonState == LOW && !prevHoldTriggered && bluetoothConnected) {
+    if (millis() - prevPressStart >= 600) {
+      a2dp_sink.previous();
+      prevHoldTriggered = true;
+    }
+  }
+  prevLastReading = prevReading;
 
   while (Serial.available()) {
 
