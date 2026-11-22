@@ -1,4 +1,3 @@
-
 const audio = document.getElementById("audio");
 
 const filesInput = document.getElementById("files");
@@ -26,22 +25,45 @@ function formatSize(bytes) {
     return (bytes / (1024 * 1024)).toFixed(2) + " MB";
 }
 
-filesInput.addEventListener("change", (event) => {
+async function loadTracksFromDb() {
+    try {
+        const response = await fetch("/api/tracks");
+        const data = await response.json();
+        tracks = Array.isArray(data) ? data : [];
+        renderPlaylist();
+        if (currentIndex === -1 && tracks.length) {
+            loadTrack(0);
+        }
+    } catch (error) {
+        console.error(error);
+    }
+}
+
+filesInput.addEventListener("change", async (event) => {
     const files = Array.from(event.target.files);
 
-    files.forEach(file => {
+    for (const file of files) {
         if (!file.type.startsWith("audio/")) return;
 
-        tracks.push({
-            source: "local",
-            name: file.name,
-            title: file.name.replace(/\\.[^/.]+$/, ""),
-            artist: "Arquivo local",
-            url: URL.createObjectURL(file),
-            size: file.size,
-            format: file.name.split(".").pop().toUpperCase()
-        });
-    });
+        const formData = new FormData();
+        formData.append("file", file);
+        formData.append("title", file.name.replace(/\.[^/.]+$/, ""));
+        formData.append("artist", "Arquivo local");
+
+        try {
+            const response = await fetch("/api/tracks/upload", {
+                method: "POST",
+                body: formData
+            });
+            const data = await response.json();
+            if (!response.ok) {
+                throw new Error(data.error || "Falha no upload.");
+            }
+            tracks.push(data);
+        } catch (error) {
+            console.error(error);
+        }
+    }
 
     renderPlaylist();
 
@@ -97,7 +119,9 @@ function loadTrack(index) {
     audio.play().then(() => {
         playButton.textContent = "⏸";
     }).catch(error => {
-        console.error("Erro na reprodução:", error);
+        if (error && error.name !== "AbortError") {
+            console.error("Erro na reprodução:", error);
+        }
     });
 
     renderPlaylist();
@@ -248,18 +272,29 @@ if (addLinkButton) {
                 throw new Error(data.error || "Falha ao buscar link.");
             }
 
-            tracks.push({
-                source: data.source || "link",
-                name: data.title || url,
-                title: data.title || "Sem título",
-                artist: data.artist || "Desconhecido",
-                album: data.album || "",
-                url: data.stream_url || data.webpage_url || url,
-                thumbnail: data.thumbnail || null,
-                size: null,
-                format: data.source ? data.source.toUpperCase() : "LINK",
-                duration: data.duration || null
+            const saveResponse = await fetch("/api/tracks", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                    source: data.source || "link",
+                    title: data.title || "Sem título",
+                    artist: data.artist || "Desconhecido",
+                    album: data.album || "",
+                    duration: data.duration || null,
+                    thumbnail: data.thumbnail || null,
+                    name: data.title || url,
+                    format: data.source ? data.source.toUpperCase() : "LINK",
+                    size: null,
+                    url: data.stream_url || data.webpage_url || url
+                })
             });
+
+            const saved = await saveResponse.json();
+            if (!saveResponse.ok) {
+                throw new Error(saved.error || "Falha ao salvar link.");
+            }
+
+            tracks.push(saved);
 
             renderPlaylist();
 
@@ -277,3 +312,5 @@ if (addLinkButton) {
         }
     });
 }
+
+loadTracksFromDb();

@@ -19,6 +19,8 @@
 #define OLED_SDA 33
 #define OLED_SCL 32
 
+#define BUTTON_PIN 12
+
 Adafruit_SSD1306 display(
   SCREEN_WIDTH,
   SCREEN_HEIGHT,
@@ -53,6 +55,10 @@ uint32_t positionMs = 0;
 bool bluetoothConnected = false;
 bool isPlaying = false;
 bool serialMetadataActive = false;
+
+bool lastButtonReading = HIGH;
+bool buttonState = HIGH;
+unsigned long lastButtonDebounce = 0;
 
 unsigned long lastDisplayUpdate = 0;
 unsigned long lastPositionTick = 0;
@@ -307,6 +313,8 @@ void setup() {
 
   Serial.begin(115200);
 
+  pinMode(BUTTON_PIN, INPUT_PULLUP);
+
   Wire.begin(OLED_SDA, OLED_SCL);
 
   if (!display.begin(
@@ -365,8 +373,7 @@ void setup() {
     connectionCallback
   );
 
-  // Iniciar Bluetooth
-
+  // Iniciar Bluetooth classic (A2DP + AVRCP)
   a2dp_sink.start("ESP32 MUSIC PLAYER");
 
   // Este dispositivo so exibe metadados: desativa saida de audio
@@ -424,6 +431,28 @@ void handleSerialCommand(const String &command) {
 }
 
 void loop() {
+
+  bool reading = digitalRead(BUTTON_PIN);
+  if (reading != lastButtonReading) {
+    lastButtonDebounce = millis();
+  }
+  if ((millis() - lastButtonDebounce) > 50) {
+    if (reading != buttonState) {
+      buttonState = reading;
+      if (buttonState == LOW && bluetoothConnected) {
+        if (isPlaying) {
+          a2dp_sink.pause();
+          isPlaying = false;
+          lastPositionTick = 0;
+        } else {
+          a2dp_sink.play();
+          isPlaying = true;
+          lastPositionTick = millis();
+        }
+      }
+    }
+  }
+  lastButtonReading = reading;
 
   while (Serial.available()) {
 
