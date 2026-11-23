@@ -308,7 +308,15 @@ void updateDisplay() {
   display.print("Musica:");
 
   display.setCursor(0, 24);
-  display.print(musicTitle);
+  char displayTitle[22];
+  if (strlen(musicTitle) > 18) {
+    strncpy(displayTitle, musicTitle, 15);
+    displayTitle[15] = '\0';
+    strcat(displayTitle, "...");
+  } else {
+    strcpy(displayTitle, musicTitle);
+  }
+  display.print(displayTitle);
 
   // ARTISTA
 
@@ -316,7 +324,15 @@ void updateDisplay() {
   display.print("Artista:");
 
   display.setCursor(45, 36);
-  display.print(musicArtist);
+  char displayArtist[14];
+  if (strlen(musicArtist) > 12) {
+    strncpy(displayArtist, musicArtist, 9);
+    displayArtist[9] = '\0';
+    strcat(displayArtist, "...");
+  } else {
+    strcpy(displayArtist, musicArtist);
+  }
+  display.print(displayArtist);
 
   // TEMPO
 
