@@ -3,26 +3,38 @@
 #include <Wire.h>
 #include <BluetoothA2DPSink.h>
 #include <esp_avrc_api.h>
+#include <ESP_I2S.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
 
-// =====================================
-// CONFIGURACAO OLED
-// =====================================
+// =================================================
+// PINOS
+// =================================================
 
+// OLED
 #define SCREEN_WIDTH 128
 #define SCREEN_HEIGHT 64
-
 #define OLED_RESET -1
 #define OLED_ADDRESS 0x3C
 
 #define OLED_SDA 33
 #define OLED_SCL 32
 
-#define BUTTON_PIN 12
+// I2S - AMPLIFICADOR
+#define I2S_BCLK 26
+#define I2S_LRC  25
+#define I2S_DOUT 27
+
+// Controlador dos botões
+#define BUTTON_PIN      12
 #define NEXT_BUTTON_PIN 14
 #define PREV_BUTTON_PIN 13
-#define VOLUME_POT_PIN 27
+
+#define VOLUME_POT_PIN 35
+
+// =================================================
+// OBJETOS
+// =================================================
 
 Adafruit_SSD1306 display(
   SCREEN_WIDTH,
@@ -31,61 +43,81 @@ Adafruit_SSD1306 display(
   OLED_RESET
 );
 
-// =====================================
-// BLUETOOTH
-// =====================================
+I2SClass i2s;
 
-class SilentA2DPSink : public BluetoothA2DPSink {
-public:
-  SilentA2DPSink() { is_output = false; }
-};
-SilentA2DPSink a2dp_sink;
+BluetoothA2DPSink a2dp_sink(i2s);
 
-// =====================================
+// =================================================
 // INFORMACOES DA MUSICA
-// =====================================
+// =================================================
 
 char musicTitle[100] = "Aguardando musica";
 char musicArtist[70] = "Desconhecido";
 char musicAlbum[70] = "";
-
-bool metadataReceived = false;
-unsigned long lastMetadataRequest = 0;
 
 uint32_t durationMs = 0;
 uint32_t positionMs = 0;
 
 bool bluetoothConnected = false;
 bool isPlaying = false;
-bool serialMetadataActive = false;
+bool metadataReceived = false;
 
-bool lastButtonReading = HIGH;
-bool buttonState = HIGH;
-unsigned long lastButtonDebounce = 0;
+// =================================================
+// CONTROLES
+// =================================================
 
-bool nextLastReading = HIGH;
-bool nextButtonState = HIGH;
-unsigned long nextLastDebounce = 0;
-unsigned long nextPressStart = 0;
-bool nextHoldTriggered = false;
+struct Button {
+  uint8_t pin;
+  bool lastReading;
+  bool stableState;
+  unsigned long lastChange;
+};
 
-bool prevLastReading = HIGH;
-bool prevButtonState = HIGH;
-unsigned long prevLastDebounce = 0;
-unsigned long prevPressStart = 0;
-bool prevHoldTriggered = false;
+Button playButton = {BUTTON_PIN, HIGH, HIGH, 0};
+Button nextButton = {NEXT_BUTTON_PIN, HIGH, HIGH, 0};
+Button prevButton = {PREV_BUTTON_PIN, HIGH, HIGH, 0};
 
 int lastVolume = -1;
 unsigned long lastVolumeRead = 0;
-
 unsigned long lastDisplayUpdate = 0;
-unsigned long lastPositionTick = 0;
 
-// =====================================
+// =================================================
+// BOTAO COM DEBOUNCE
+// =================================================
+
+bool buttonPressed(Button &button) {
+
+  bool reading = digitalRead(button.pin);
+
+  if (reading != button.lastReading) {
+    button.lastChange = millis();
+    button.lastReading = reading;
+  }
+
+  if (millis() - button.lastChange >= 50) {
+
+    if (reading != button.stableState) {
+
+      button.stableState = reading;
+
+      if (button.stableState == LOW) {
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+// =================================================
 // FORMATAR TEMPO
-// =====================================
+// =================================================
 
-void formatTime(uint32_t milliseconds, char *buffer, size_t size) {
+void formatTime(
+  uint32_t milliseconds,
+  char *buffer,
+  size_t size
+) {
 
   uint32_t seconds = milliseconds / 1000;
 
@@ -98,70 +130,78 @@ void formatTime(uint32_t milliseconds, char *buffer, size_t size) {
   );
 }
 
-// =====================================
-// METADADOS AVRCP
-// =====================================
+// =================================================
+// METADADOS BLUETOOTH AVRCP
+// =================================================
 
 void metadataCallback(uint8_t id, const uint8_t *text) {
 
   if (text == nullptr) return;
 
+  const char *value = (const char *)text;
+
   metadataReceived = true;
 
-  Serial.printf("AVRC meta id=0x%x len=%u text=%s\n", id, (unsigned)strlen((const char*)text), (const char*)text);
-
-  const char *value = (const char *)text;
+  Serial.printf(
+    "Metadata recebida: %s\n",
+    value
+  );
 
   switch (id) {
 
     case ESP_AVRC_MD_ATTR_TITLE:
 
       if (value[0] != '\0') {
-        strncpy(musicTitle, value, sizeof(musicTitle) - 1);
+        strncpy(
+          musicTitle,
+          value,
+          sizeof(musicTitle) - 1
+        );
+
         musicTitle[sizeof(musicTitle) - 1] = '\0';
       }
-
-      Serial.printf("Titulo: %s\n", musicTitle);
 
       break;
 
     case ESP_AVRC_MD_ATTR_ARTIST:
 
       if (value[0] != '\0') {
-        strncpy(musicArtist, value, sizeof(musicArtist) - 1);
+        strncpy(
+          musicArtist,
+          value,
+          sizeof(musicArtist) - 1
+        );
+
         musicArtist[sizeof(musicArtist) - 1] = '\0';
       }
-
-      Serial.printf("Artista: %s\n", musicArtist);
 
       break;
 
     case ESP_AVRC_MD_ATTR_ALBUM:
 
       if (value[0] != '\0') {
-        strncpy(musicAlbum, value, sizeof(musicAlbum) - 1);
+        strncpy(
+          musicAlbum,
+          value,
+          sizeof(musicAlbum) - 1
+        );
+
         musicAlbum[sizeof(musicAlbum) - 1] = '\0';
       }
-
-      Serial.printf("Album: %s\n", musicAlbum);
 
       break;
 
     case ESP_AVRC_MD_ATTR_PLAYING_TIME:
 
-      if (value[0] != '\0') {
-        durationMs = strtoul(value, nullptr, 10);
-      }
-
-      Serial.printf("Duracao: %lu ms\n", durationMs);
+      durationMs = strtoul(value, nullptr, 10);
 
       break;
   }
 }
 
-// =====================================
+// =================================================
 // ESTADO DA REPRODUCAO
-// =====================================
+// =================================================
 
 void playbackCallback(esp_avrc_playback_stat_t status) {
 
@@ -170,16 +210,14 @@ void playbackCallback(esp_avrc_playback_stat_t status) {
     case ESP_AVRC_PLAYBACK_PLAYING:
 
       isPlaying = true;
-      lastPositionTick = millis();
-      Serial.println("PLAYING");
+      Serial.println("Musica reproduzindo");
 
       break;
 
     case ESP_AVRC_PLAYBACK_PAUSED:
 
       isPlaying = false;
-      lastPositionTick = 0;
-      Serial.println("PAUSED");
+      Serial.println("Musica pausada");
 
       break;
 
@@ -187,9 +225,8 @@ void playbackCallback(esp_avrc_playback_stat_t status) {
 
       isPlaying = false;
       positionMs = 0;
-      lastPositionTick = 0;
 
-      Serial.println("STOPPED");
+      Serial.println("Musica parada");
 
       break;
 
@@ -198,52 +235,54 @@ void playbackCallback(esp_avrc_playback_stat_t status) {
   }
 }
 
-// =====================================
+// =================================================
 // POSICAO DA MUSICA
-// =====================================
+// =================================================
 
 void positionCallback(uint32_t position) {
 
   positionMs = position;
 }
 
-// =====================================
+// =================================================
 // CONEXAO BLUETOOTH
-// =====================================
+// =================================================
 
 void connectionCallback(bool connected) {
 
   bluetoothConnected = connected;
 
-  if (connected) {
-    metadataReceived = false;
-    serialMetadataActive = false;
-    lastMetadataRequest = millis();
-    lastPositionTick = 0;
-  }
-
   Serial.println(
     connected
-      ? "Bluetooth conectado"
-      : "Bluetooth desconectado"
+      ? "Bluetooth conectado!"
+      : "Bluetooth desconectado!"
   );
 
-  if (!connected) {
+  if (connected) {
 
-    isPlaying = false;
+    metadataReceived = false;
     positionMs = 0;
-
     durationMs = 0;
 
     strcpy(musicTitle, "Aguardando musica");
     strcpy(musicArtist, "Desconhecido");
+
+  } else {
+
+    isPlaying = false;
+    positionMs = 0;
+    durationMs = 0;
+
+    strcpy(musicTitle, "Aguardando musica");
+    strcpy(musicArtist, "Desconhecido");
+
     musicAlbum[0] = '\0';
   }
 }
 
-// =====================================
-// EXIBIR OLED
-// =====================================
+// =================================================
+// OLED
+// =================================================
 
 void updateDisplay() {
 
@@ -269,20 +308,17 @@ void updateDisplay() {
   display.print("Musica:");
 
   display.setCursor(0, 24);
-
   display.print(musicTitle);
 
   // ARTISTA
 
   display.setCursor(0, 36);
+  display.print("Artista:");
 
-  display.print("Artista: ");
-
+  display.setCursor(45, 36);
   display.print(musicArtist);
 
-  // PROGRESSO
-
-  display.setCursor(0, 48);
+  // TEMPO
 
   char current[12];
   char total[12];
@@ -290,6 +326,7 @@ void updateDisplay() {
   formatTime(positionMs, current, sizeof(current));
   formatTime(durationMs, total, sizeof(total));
 
+  display.setCursor(0, 48);
   display.print(current);
   display.print(" / ");
   display.print(total);
@@ -297,7 +334,6 @@ void updateDisplay() {
   // STATUS
 
   display.setCursor(92, 48);
-
   display.print(isPlaying ? "PLAY" : "PAUSE");
 
   // BARRA DE PROGRESSO
@@ -309,7 +345,9 @@ void updateDisplay() {
     uint32_t progressWidth =
       ((uint64_t)positionMs * 126) / durationMs;
 
-    if (progressWidth > 126) progressWidth = 126;
+    if (progressWidth > 126) {
+      progressWidth = 126;
+    }
 
     display.fillRect(
       1,
@@ -323,17 +361,117 @@ void updateDisplay() {
   display.display();
 }
 
-// =====================================
+// =================================================
+// PLAY / PAUSE
+// =================================================
+
+void togglePlayback() {
+
+  if (!bluetoothConnected) return;
+
+  if (isPlaying) {
+
+    a2dp_sink.pause();
+
+    isPlaying = false;
+
+    Serial.println("PAUSE solicitado");
+
+  } else {
+
+    a2dp_sink.play();
+
+    isPlaying = true;
+
+    Serial.println("PLAY solicitado");
+  }
+}
+
+// =================================================
+// PROXIMA MUSICA
+// =================================================
+
+void nextTrack() {
+
+  if (!bluetoothConnected) return;
+
+  a2dp_sink.next();
+
+  Serial.println("Proxima musica");
+}
+
+// =================================================
+// MUSICA ANTERIOR
+// =================================================
+
+void previousTrack() {
+
+  if (!bluetoothConnected) return;
+
+  a2dp_sink.previous();
+
+  Serial.println("Musica anterior");
+}
+
+// =================================================
+// CONTROLE DE VOLUME
+// =================================================
+
+void updateVolume() {
+
+  if (millis() - lastVolumeRead < 200) return;
+
+  lastVolumeRead = millis();
+
+  int raw = analogRead(VOLUME_POT_PIN);
+
+  int volume = map(raw, 0, 4095, 0, 127);
+
+  volume = constrain(volume, 0, 127);
+
+  if (lastVolume < 0 || abs(volume - lastVolume) >= 2) {
+
+    lastVolume = volume;
+
+    a2dp_sink.set_volume((uint8_t)volume);
+
+    Serial.printf("Volume: %d/127\n", volume);
+  }
+}
+
+// =================================================
 // SETUP
-// =====================================
+// =================================================
 
 void setup() {
 
   Serial.begin(115200);
 
+  delay(500);
+
+  Serial.println();
+  Serial.println("================================");
+  Serial.println("ESP32 MUSIC PLAYER");
+  Serial.println("INICIALIZANDO...");
+  Serial.println("================================");
+
+  // -----------------------------------------------
+  // BOTOES
+  // -----------------------------------------------
+
   pinMode(BUTTON_PIN, INPUT_PULLUP);
   pinMode(NEXT_BUTTON_PIN, INPUT_PULLUP);
   pinMode(PREV_BUTTON_PIN, INPUT_PULLUP);
+
+  // -----------------------------------------------
+  // POTENCIOMETRO
+  // -----------------------------------------------
+
+  analogReadResolution(12);
+
+  // -----------------------------------------------
+  // OLED
+  // -----------------------------------------------
 
   Wire.begin(OLED_SDA, OLED_SCL);
 
@@ -342,7 +480,7 @@ void setup() {
     OLED_ADDRESS
   )) {
 
-    Serial.println("Erro OLED");
+    Serial.println("ERRO: OLED nao encontrado!");
 
     while (true) {
       delay(1000);
@@ -351,15 +489,53 @@ void setup() {
 
   display.clearDisplay();
 
-  display.setTextColor(SSD1306_WHITE);
   display.setTextSize(1);
+  display.setTextColor(SSD1306_WHITE);
 
   display.setCursor(10, 25);
-  display.println("Iniciando Bluetooth...");
+  display.println("Iniciando sistema...");
 
   display.display();
 
-  // Solicitar metadados AVRCP
+  // -----------------------------------------------
+  // I2S
+  // -----------------------------------------------
+
+  Serial.println("Configurando I2S...");
+
+  i2s.setPins(
+    I2S_BCLK,
+    I2S_LRC,
+    I2S_DOUT
+  );
+
+  bool i2sStarted = i2s.begin(
+    I2S_MODE_STD,
+    44100,
+    I2S_DATA_BIT_WIDTH_16BIT,
+    I2S_SLOT_MODE_STEREO,
+    I2S_STD_SLOT_BOTH
+  );
+
+  if (!i2sStarted) {
+
+    Serial.println("ERRO AO INICIAR I2S!");
+
+    display.clearDisplay();
+    display.setCursor(0, 25);
+    display.println("ERRO I2S!");
+    display.display();
+
+    while (true) {
+      delay(1000);
+    }
+  }
+
+  Serial.println("I2S iniciado com sucesso!");
+
+  // -----------------------------------------------
+  // CALLBACKS AVRCP
+  // -----------------------------------------------
 
   a2dp_sink.set_avrc_metadata_attribute_mask(
     ESP_AVRC_MD_ATTR_TITLE |
@@ -368,48 +544,49 @@ void setup() {
     ESP_AVRC_MD_ATTR_PLAYING_TIME
   );
 
-  // Callback metadados
-
   a2dp_sink.set_avrc_metadata_callback(
     metadataCallback
   );
 
-  // Callback reproducao
-
   a2dp_sink.set_avrc_rn_playstatus_callback(
     playbackCallback
   );
-
-  // Callback posicao
 
   a2dp_sink.set_avrc_rn_play_pos_callback(
     positionCallback,
     1
   );
 
-  // Callback conexao
-
   a2dp_sink.set_avrc_connection_state_callback(
     connectionCallback
   );
 
-  // Iniciar Bluetooth classic (A2DP + AVRCP)
+  // -----------------------------------------------
+  // BLUETOOTH + AUDIO
+  // -----------------------------------------------
+
+  Serial.println("Iniciando Bluetooth A2DP...");
+
+  // O I2SClass sera utilizado como saida de audio.
+  // Nao desativar set_output_active!
+
   a2dp_sink.start("ESP32 MUSIC PLAYER");
 
-  // Este dispositivo so exibe metadados: desativa saida de audio
-  // para evitar bloqueio da tarefa Bluetooth (watchdog).
-  a2dp_sink.set_output_active(false);
+  a2dp_sink.set_volume(80);
 
-  Serial.println();
-  Serial.println("============================");
-  Serial.println("ESP32 MUSIC PLAYER");
-  Serial.println("Bluetooth aguardando conexao");
-  Serial.println("============================");
+  Serial.println("Bluetooth aguardando conexao!");
+
+  display.clearDisplay();
+  display.setCursor(0, 20);
+  display.println("TESTE DISPLAY");
+  display.println("ESP32 MUSIC PLAYER");
+  display.display();
+  delay(2000);
 }
 
-// =====================================
-// LOOP
-// =====================================
+// =================================================
+// COMANDO SERIAL (META|titulo|artista|duracao_ms)
+// =================================================
 
 void handleSerialCommand(const String &command) {
 
@@ -420,17 +597,9 @@ void handleSerialCommand(const String &command) {
   int firstSep = payload.indexOf('|');
   int secondSep = payload.indexOf('|', firstSep + 1);
 
-  String title = firstSep >= 0
-    ? payload.substring(0, firstSep)
-    : payload;
-
-  String artist = (firstSep >= 0 && secondSep >= 0)
-    ? payload.substring(firstSep + 1, secondSep)
-    : "Desconhecido";
-
-  String duration = secondSep >= 0
-    ? payload.substring(secondSep + 1)
-    : "0";
+  String title = firstSep >= 0 ? payload.substring(0, firstSep) : payload;
+  String artist = (firstSep >= 0 && secondSep >= 0) ? payload.substring(firstSep + 1, secondSep) : "Desconhecido";
+  String duration = secondSep >= 0 ? payload.substring(secondSep + 1) : "0";
 
   if (title.length() == 0) title = "Sem titulo";
   if (artist.length() == 0) artist = "Desconhecido";
@@ -444,107 +613,17 @@ void handleSerialCommand(const String &command) {
   durationMs = (uint32_t)duration.toInt();
   positionMs = 0;
   isPlaying = true;
-  serialMetadataActive = true;
-  lastPositionTick = millis();
 
   Serial.printf("Serial metadata: %s - %s\n", musicTitle, musicArtist);
 }
 
+// =================================================
+// LOOP
+// =================================================
+
 void loop() {
 
-  bool reading = digitalRead(BUTTON_PIN);
-  if (reading != lastButtonReading) {
-    lastButtonDebounce = millis();
-  }
-  if ((millis() - lastButtonDebounce) > 50) {
-    if (reading != buttonState) {
-      buttonState = reading;
-      if (buttonState == LOW && bluetoothConnected) {
-        if (isPlaying) {
-          a2dp_sink.pause();
-          isPlaying = false;
-          lastPositionTick = 0;
-        } else {
-          a2dp_sink.play();
-          isPlaying = true;
-          lastPositionTick = millis();
-        }
-      }
-    }
-  }
-  lastButtonReading = reading;
-
-  // Botao NEXT (D14): click = +5s, segurar = proxima faixa
-  bool nextReading = digitalRead(NEXT_BUTTON_PIN);
-  if (nextReading != nextLastReading) {
-    nextLastDebounce = millis();
-  }
-  if ((millis() - nextLastDebounce) > 50) {
-    if (nextReading != nextButtonState) {
-      nextButtonState = nextReading;
-      if (nextButtonState == LOW) {
-        nextPressStart = millis();
-        nextHoldTriggered = false;
-      } else {
-        if (!nextHoldTriggered && bluetoothConnected) {
-          esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_FAST_FORWARD, ESP_AVRC_PT_CMD_STATE_PRESSED);
-          delay(1000);
-          esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_FAST_FORWARD, ESP_AVRC_PT_CMD_STATE_RELEASED);
-        }
-        nextHoldTriggered = false;
-      }
-    }
-  }
-  if (nextButtonState == LOW && !nextHoldTriggered && bluetoothConnected) {
-    if (millis() - nextPressStart >= 600) {
-      a2dp_sink.next();
-      nextHoldTriggered = true;
-    }
-  }
-  nextLastReading = nextReading;
-
-  // Botao PREV (D13): click = -5s, segurar = faixa anterior
-  bool prevReading = digitalRead(PREV_BUTTON_PIN);
-  if (prevReading != prevLastReading) {
-    prevLastDebounce = millis();
-  }
-  if ((millis() - prevLastDebounce) > 50) {
-    if (prevReading != prevButtonState) {
-      prevButtonState = prevReading;
-      if (prevButtonState == LOW) {
-        prevPressStart = millis();
-        prevHoldTriggered = false;
-      } else {
-        if (!prevHoldTriggered && bluetoothConnected) {
-          esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_REWIND, ESP_AVRC_PT_CMD_STATE_PRESSED);
-          delay(1000);
-          esp_avrc_ct_send_passthrough_cmd(0, ESP_AVRC_PT_CMD_REWIND, ESP_AVRC_PT_CMD_STATE_RELEASED);
-        }
-        prevHoldTriggered = false;
-      }
-    }
-  }
-  if (prevButtonState == LOW && !prevHoldTriggered && bluetoothConnected) {
-    if (millis() - prevPressStart >= 600) {
-      a2dp_sink.previous();
-      prevHoldTriggered = true;
-    }
-  }
-  prevLastReading = prevReading;
-
-  // Volume por potenciometro no pino 27
-  if (millis() - lastVolumeRead >= 200) {
-    lastVolumeRead = millis();
-    int raw = analogRead(VOLUME_POT_PIN);
-    int volume = map(raw, 0, 4095, 0, 127);
-    if (volume < 0) volume = 0;
-    if (volume > 127) volume = 127;
-    if (abs(volume - lastVolume) > 1) {
-      lastVolume = volume;
-      a2dp_sink.set_volume((uint8_t)volume);
-    }
-  }
-
+  // COMANDO SERIAL
   while (Serial.available()) {
 
     static String serialBuffer;
@@ -567,30 +646,32 @@ void loop() {
     }
   }
 
-  if (serialMetadataActive && isPlaying) {
-    unsigned long now = millis();
-    if (lastPositionTick == 0) {
-      lastPositionTick = now;
-    } else {
-      unsigned long delta = now - lastPositionTick;
-      lastPositionTick = now;
-      if (durationMs > 0 && positionMs + delta >= durationMs) {
-        positionMs = durationMs;
-        isPlaying = false;
-        serialMetadataActive = false;
-      } else {
-        positionMs += (uint32_t)delta;
-      }
-    }
+  // PLAY / PAUSE
+
+  if (buttonPressed(playButton)) {
+
+    togglePlayback();
   }
 
-  if (!bluetoothConnected && !serialMetadataActive) {
-    if (isPlaying || positionMs != 0) {
-      isPlaying = false;
-      positionMs = 0;
-      lastPositionTick = 0;
-    }
+  // PROXIMA FAIXA
+
+  if (buttonPressed(nextButton)) {
+
+    nextTrack();
   }
+
+  // FAIXA ANTERIOR
+
+  if (buttonPressed(prevButton)) {
+
+    previousTrack();
+  }
+
+  // VOLUME
+
+  updateVolume();
+
+  // OLED
 
   if (millis() - lastDisplayUpdate >= 500) {
 
@@ -599,5 +680,5 @@ void loop() {
     updateDisplay();
   }
 
-  delay(10);
+  delay(5);
 }

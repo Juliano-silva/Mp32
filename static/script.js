@@ -119,7 +119,7 @@ function loadTrack(index) {
     audio.play().then(() => {
         playButton.textContent = "⏸";
     }).catch(error => {
-        if (error && error.name !== "AbortError") {
+        if (error && error.name !== "AbortError" && error.name !== "NotAllowedError") {
             console.error("Erro na reprodução:", error);
         }
     });
