@@ -6,6 +6,8 @@ const playlistElement = document.getElementById("playlist");
 const titleElement = document.getElementById("title");
 const filenameElement = document.getElementById("filename");
 
+const Thumb = document.getElementById("Thumb")
+
 const playButton = document.getElementById("play");
 const progress = document.getElementById("progress");
 
@@ -102,7 +104,7 @@ function loadTrack(index) {
     audio.src = track.url;
 
     titleElement.textContent =
-        track.title || track.name || "Sem título";
+        track.title || track.name || "Sem tÃ­tulo";
 
     filenameElement.textContent =
         track.name || track.url || "-";
@@ -111,39 +113,43 @@ function loadTrack(index) {
         track.size ? formatSize(track.size) : "-";
 
     document.getElementById("format").textContent =
-        track.format || (track.source ? track.source.toUpperCase() : "-");
+        track.format || (track.source ? track.source.toUpperCase() : "-");    
 
     updateMediaSession();
     notifyEsp32();
 
     audio.play().then(() => {
-        playButton.textContent = "⏸";
+        setPlayState(true);
+        Thumb.style.backgroundImage = `url("${track.thumbnail}")`
+        Thumb.classList = ""
     }).catch(error => {
         if (error && error.name !== "AbortError" && error.name !== "NotAllowedError") {
-            console.error("Erro na reprodução:", error);
+            console.error("Erro na reproducao:", error);
         }
     });
 
     renderPlaylist();
 }
 
+const playIcon = document.getElementById("playIcon");
+
+function setPlayState(playing) {
+    if (playIcon) {
+        playIcon.src = playing ? "/static/icons/pause.png" : "/static/icons/play.png";
+        playIcon.alt = playing ? "Pausar" : "Reproduzir";
+    } else {
+        playButton.textContent = playing ? "❚❚" : "▶";
+    }
+    playButton.setAttribute("aria-label", playing ? "Pausar" : "Reproduzir");
+}
+
 playButton.addEventListener("click", () => {
     if (!audio.src) return;
-
-    if (audio.paused) {
-        audio.play();
-    } else {
-        audio.pause();
-    }
+    if (audio.paused) { audio.play(); } else { audio.pause(); }
 });
 
-audio.addEventListener("play", () => {
-    playButton.textContent = "⏸";
-});
-
-audio.addEventListener("pause", () => {
-    playButton.textContent = "▶";
-});
+audio.addEventListener("play", () => setPlayState(true));
+audio.addEventListener("pause", () => setPlayState(false));
 
 audio.addEventListener("loadedmetadata", () => {
     document.getElementById("duration").textContent =
@@ -171,9 +177,14 @@ progress.addEventListener("input", () => {
     audio.currentTime = Number(progress.value);
 });
 
-document.getElementById("volume").addEventListener("input", event => {
-    audio.volume = Number(event.target.value);
-});
+const volumeControl = document.getElementById("volume");
+if (volumeControl) {
+    volumeControl.addEventListener("input", event => {
+        audio.volume = Number(event.target.value);
+    });
+} else {
+    audio.volume = 0.8;
+}
 
 document.getElementById("next").addEventListener("click", () => {
     if (tracks.length) {
@@ -201,7 +212,7 @@ function updateMediaSession() {
     const track = tracks[currentIndex];
 
     navigator.mediaSession.metadata = new MediaMetadata({
-        title: track.title || track.name || "Sem título",
+        title: track.title || track.name || "Sem tÃ­tulo",
         artist: track.artist || "Desconhecido",
         album: track.album || "Minha playlist",
         artwork: track.thumbnail ? [{ src: track.thumbnail }] : []
@@ -238,7 +249,7 @@ function notifyEsp32() {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
-            title: track.title || track.name || "Sem título",
+            title: track.title || track.name || "Sem tÃ­tulo",
             artist: track.artist || "Desconhecido",
             duration: track.duration || audio.duration || 0
         })
@@ -277,7 +288,7 @@ if (addLinkButton) {
                 headers: { "Content-Type": "application/json" },
                 body: JSON.stringify({
                     source: data.source || "link",
-                    title: data.title || "Sem título",
+                    title: data.title || "Sem tÃ­tulo",
                     artist: data.artist || "Desconhecido",
                     album: data.album || "",
                     duration: data.duration || null,
@@ -314,3 +325,4 @@ if (addLinkButton) {
 }
 
 loadTracksFromDb();
+

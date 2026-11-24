@@ -4,66 +4,89 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>ESP32 Music Player</title>
-    <link rel="stylesheet" href="../static/style.css">
+    <title>Mp32 Player</title>
+    <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<div class="ambient ambient-a"></div>
+<div class="ambient ambient-b"></div>
+<main class="app">
+    <header class="topbar">
+        <div class="brand">
+            <span class="brand-mark">&#9835;</span>
+            <span class="brand-name">Reproduction Mp32</span>
+        </div>
+    </header>
 
-<main class="player">
+    <section class="player-shell">
+        <div class="now-playing">
+            <div class="cover-wrap">
+                <div class="cover-glow"></div>
+                <div class="cover" aria-hidden="true">
+                    <span class="cover-icon" id="Thumb">&#9835;</span>
+                </div>
+            </div>
 
-    <h1>ESP32 Music Player</h1>
-    <p>Seu player de música local</p>
+            <div class="track-block">
+                <p class="label">Tocando agora</p>
+                <h1 id="title">Nenhuma musica</h1>
+                <p id="filename" class="artist">Selecione uma faixa para comecar</p>
+            </div>
 
-    <label class="upload">
-        + Adicionar músicas
-        <input type="file" id="files" accept="audio/*" multiple hidden>
-    </label>
+            <audio id="audio"></audio>
 
-    <section class="link-add">
-        <input type="url" id="linkInput" placeholder="Cole um link do YouTube ou Spotify">
-        <button id="addLink" type="button">Adicionar link</button>
-        <span id="linkStatus"></span>
+            <div class="progress-block">
+                <div class="times">
+                    <span id="currentTime">00:00</span>
+                    <span id="duration">00:00</span>
+                </div>
+                <input type="range" id="progress" min="0" max="100" value="0" aria-label="Progresso">
+            </div>
+
+            <div class="controls">
+                <button id="previous" class="ctrl-btn ctrl-btn--side" type="button" aria-label="Anterior">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M6 5h2v14H6zm3.5 7L19 5v14z"/></svg>
+                </button>
+                <button id="play" class="ctrl-btn ctrl-btn--main" type="button" aria-label="Reproduzir">
+                    <img id="playIcon" src="/static/icons/play.png" alt="" width="28" height="28">
+                </button>
+                <button id="next" class="ctrl-btn ctrl-btn--side" type="button" aria-label="Proxima">
+                    <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M16 5h2v14h-2zM5 5l9.5 7L5 19z"/></svg>
+                </button>
+            </div>
+
+            <div class="track-meta">
+                <span class="meta-pill"><span class="meta-k">Formato</span><span id="format">-</span></span>
+                <span class="meta-pill"><span class="meta-k">Tamanho</span><span id="size">-</span></span>
+                <span class="meta-pill"><span class="meta-k">Duracao</span><span id="durationInfo">-</span></span>
+            </div>
+        </div>
+
+        <aside class="library">
+            <div class="library-head">
+                <div>
+                    <p class="label">Sua biblioteca</p>
+                    <h2>Playlist</h2>
+                </div>
+                <label class="add-file-btn" title="Adicionar arquivos">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>
+                    <span>Arquivos</span>
+                    <input type="file" id="files" accept="audio/*" multiple hidden>
+                </label>
+            </div>
+
+            <div class="link-row">
+                <input type="url" id="linkInput" placeholder="Colar link do YouTube ou Spotify">
+                <button id="addLink" type="button" aria-label="Adicionar link">
+                    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg>
+                </button>
+            </div>
+            <p id="linkStatus" class="status" aria-live="polite"></p>
+
+            <ul id="playlist" class="playlist"></ul>
+        </aside>
     </section>
-
-    <section class="current">
-        <div class="cover">♫</div>
-
-        <h2 id="title">Nenhuma música</h2>
-        <p id="filename">Selecione um arquivo</p>
-
-        <audio id="audio"></audio>
-
-        <input type="range" id="progress"
-               min="0" max="100" value="0">
-
-        <div class="times">
-            <span id="currentTime">00:00</span>
-            <span id="duration">00:00</span>
-        </div>
-
-        <div class="controls">
-            <button id="previous">⏮</button>
-            <button id="play">▶</button>
-            <button id="next">⏭</button>
-        </div>
-
-        <label>Volume
-            <input type="range" id="volume"
-                   min="0" max="1" step="0.01" value="0.7">
-        </label>
-
-        <div class="metadata">
-            <p>Formato: <span id="format">-</span></p>
-            <p>Tamanho: <span id="size">-</span></p>
-            <p>Duração: <span id="durationInfo">-</span></p>
-        </div>
-    </section>
-
-    <h3>Playlist</h3>
-    <ul id="playlist"></ul>
-
 </main>
-
-<script src="../static/script.js"></script>
+<script src="/static/script.js"></script>
 </body>
 </html>

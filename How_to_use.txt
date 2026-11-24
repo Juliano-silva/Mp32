@@ -2,4 +2,3 @@ A biblioteca do Python:
 pip install flask yt-dlp spotipy requests
 python main.py
 
-
