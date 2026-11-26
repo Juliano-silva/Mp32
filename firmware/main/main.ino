@@ -1,36 +1,12 @@
 
 #include <Arduino.h>
+#include "pins.ino"
 #include <Wire.h>
 #include <BluetoothA2DPSink.h>
 #include <esp_avrc_api.h>
 #include <ESP_I2S.h>
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
-
-// =================================================
-// PINOS
-// =================================================
-
-// OLED
-#define SCREEN_WIDTH 128
-#define SCREEN_HEIGHT 64
-#define OLED_RESET -1
-#define OLED_ADDRESS 0x3C
-
-#define OLED_SDA 33
-#define OLED_SCL 32
-
-// I2S - AMPLIFICADOR
-#define I2S_BCLK 26
-#define I2S_LRC  25
-#define I2S_DOUT 27
-
-// Controlador dos botões
-#define BUTTON_PIN      12
-#define NEXT_BUTTON_PIN 14
-#define PREV_BUTTON_PIN 13
-
-#define VOLUME_POT_PIN 35
 
 // =================================================
 // OBJETOS

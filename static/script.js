@@ -285,7 +285,8 @@ if (addLinkButton) {
                     name: data.title || url,
                     format: data.source ? data.source.toUpperCase() : "LINK",
                     size: null,
-                    url: data.stream_url || data.webpage_url || url
+                    url: data.stream_url || data.webpage_url || url,
+                    webpage_url: data.webpage_url || null
                 })
             });
 

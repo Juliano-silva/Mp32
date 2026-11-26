@@ -54,11 +54,17 @@ def init_db():
             format TEXT,
             size INTEGER,
             url TEXT,
+            webpage_url TEXT,
             data BLOB,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
     conn.commit()
+    try:
+        conn.execute("ALTER TABLE tracks ADD COLUMN webpage_url TEXT")
+        conn.commit()
+    except Exception:
+        pass
     conn.close()
 
 
@@ -73,18 +79,20 @@ def track_from_row(row):
         "duration": row["duration"],
         "thumbnail": row["thumbnail"],
         "url": "/api/tracks/{}/stream".format(row["id"]),
+        "webpage_url": row["webpage_url"] if "webpage_url" in row.keys() else None,
         "size": row["size"],
         "format": row["format"],
     }
 
 
 def insert_track(source=None, title=None, artist=None, album=None, duration=None,
-                thumbnail=None, filename=None, format=None, size=None, url=None, data=None):
+                thumbnail=None, filename=None, format=None, size=None, url=None, data=None,
+                webpage_url=None):
     conn = get_db()
     cur = conn.execute(
-        """INSERT INTO tracks (source, title, artist, album, duration, thumbnail, filename, format, size, url, data)
-           VALUES (?,?,?,?,?,?,?,?,?,?,?)""",
-        (source, title, artist, album, duration, thumbnail, filename, format, size, url, data),
+        """INSERT INTO tracks (source, title, artist, album, duration, thumbnail, filename, format, size, url, webpage_url, data)
+           VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+        (source, title, artist, album, duration, thumbnail, filename, format, size, url, webpage_url, data),
     )
     conn.commit()
     row = conn.execute("SELECT * FROM tracks WHERE id=?", (cur.lastrowid,)).fetchone()
@@ -360,19 +368,30 @@ def api_link():
     return jsonify(meta)
 
 
-@app.route("/api/stream")
-def api_stream():
-    target = request.args.get("url")
+def unproxied(url):
+    if not url:
+        return None
+    if url.startswith("/api/stream?url="):
+        return urllib.parse.unquote(url.split("url=", 1)[-1])
+    return url
+
+
+def proxy_request(target):
     if not target:
-        abort(400)
-    target = urllib.parse.unquote(target)
-    headers = {}
+        return None
+    headers = {"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"}
     if "Range" in request.headers:
         headers["Range"] = request.headers["Range"]
     try:
         upstream = requests.get(target, stream=True, headers=headers, timeout=30)
     except Exception:
-        abort(502)
+        return None
+    if upstream.status_code >= 400:
+        try:
+            upstream.close()
+        except Exception:
+            pass
+        return None
     def generate():
         for chunk in upstream.iter_content(chunk_size=8192):
             if chunk:
@@ -382,6 +401,18 @@ def api_stream():
         if header in upstream.headers:
             response.headers[header] = upstream.headers[header]
     return response
+
+
+@app.route("/api/stream")
+def api_stream():
+    target = request.args.get("url")
+    if not target:
+        abort(400)
+    target = urllib.parse.unquote(target)
+    resp = proxy_request(target)
+    if resp is None:
+        abort(502)
+    return resp
 
 
 @app.route("/api/tracks", methods=["GET"])
@@ -410,6 +441,7 @@ def api_tracks_create():
         format=data.get("format"),
         size=data.get("size"),
         url=data.get("url"),
+        webpage_url=data.get("webpage_url"),
         data=None,
     )
     return jsonify(track), 201
@@ -456,19 +488,77 @@ def api_tracks_delete(track_id):
     return jsonify({"ok": True})
 
 
+def resolve_fresh_stream(row):
+    webpage_url = row["webpage_url"] if "webpage_url" in row.keys() else None
+    stored = row["url"]
+    if not webpage_url and stored and ("youtube.com" in stored or "youtu.be" in stored or "spotify.com" in stored):
+        webpage_url = unproxied(stored)
+    if webpage_url and ("youtube.com" in webpage_url or "youtu.be" in webpage_url or "music.youtube.com" in webpage_url):
+        try:
+            meta = fetch_youtube(webpage_url)
+            url = unproxied(meta.get("stream_url"))
+            if url:
+                return url
+        except Exception:
+            pass
+    if webpage_url and "spotify.com" in webpage_url:
+        try:
+            meta = fetch_spotify(webpage_url)
+            url = unproxied(meta.get("stream_url"))
+            if url:
+                return url
+        except Exception:
+            pass
+    # Fallback: search YouTube by title for tracks without an original URL
+    title = row["title"] if "title" in row.keys() else None
+    artist = row["artist"] if "artist" in row.keys() else None
+    query = " ".join(part for part in [artist, title] if part).strip()
+    if query and (row["source"] in (None, "youtube", "link")):
+        try:
+            yt = search_youtube_audio(query)
+            if yt:
+                url = unproxied(yt.get("stream_url"))
+                if url:
+                    return url
+        except Exception:
+            pass
+    target = unproxied(stored)
+    if target and target.startswith("http"):
+        return target
+    return None
+
+
 @app.route("/api/tracks/<int:track_id>/stream")
 def api_track_stream(track_id):
     conn = get_db()
-    row = conn.execute("SELECT data, url, filename FROM tracks WHERE id=?", (track_id,)).fetchone()
+    row = conn.execute("SELECT data, url, filename, webpage_url, source, title, artist FROM tracks WHERE id=?", (track_id,)).fetchone()
     conn.close()
     if not row:
         abort(404)
     if row["data"] is not None:
         mimetype = mimetypes.guess_type(row["filename"] or "")[0] or "application/octet-stream"
         return send_file(io.BytesIO(row["data"]), mimetype=mimetype, download_name=row["filename"], conditional=True)
-    if row["url"]:
-        return redirect(row["url"], code=302)
-    abort(404)
+    stored = row["url"]
+    target = unproxied(stored)
+    resp = proxy_request(target) if target else None
+    if resp is None:
+        try:
+            new_target = resolve_fresh_stream(row)
+        except Exception:
+            new_target = None
+        if new_target:
+            try:
+                proxied_url = "/api/stream?url=" + urllib.parse.quote(new_target, safe="")
+                conn = get_db()
+                conn.execute("UPDATE tracks SET url=? WHERE id=?", (proxied_url, track_id))
+                conn.commit()
+                conn.close()
+            except Exception:
+                pass
+            resp = proxy_request(new_target)
+    if resp is None:
+        abort(404)
+    return resp
 
 
 init_db()
