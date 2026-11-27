@@ -37,6 +37,9 @@ uint32_t positionMs = 0;
 bool bluetoothConnected = false;
 bool isPlaying = false;
 bool metadataReceived = false;
+bool oledAvailable = false;
+
+int bluetoothPinCode = 0;
 
 // =================================================
 // CONTROLES
@@ -257,10 +260,25 @@ void connectionCallback(bool connected) {
 }
 
 // =================================================
+// PIN CODE BLUETOOTH
+// =================================================
+
+void pinCodeCallback(int pin_code) {
+
+  if (pin_code != 0) {
+    bluetoothPinCode = pin_code;
+  }
+
+  Serial.printf("Senha Bluetooth: %d\n", bluetoothPinCode);
+}
+
+// =================================================
 // OLED
 // =================================================
 
 void updateDisplay() {
+
+  if (!oledAvailable) return;
 
   display.clearDisplay();
 
@@ -406,6 +424,17 @@ void previousTrack() {
 }
 
 // =================================================
+// LEDS DE STATUS
+// =================================================
+
+void updateLeds() {
+
+  digitalWrite(LED_RED_PIN, bluetoothConnected ? LOW : HIGH);
+  digitalWrite(LED_YELLOW_PIN, (bluetoothConnected && !isPlaying) ? HIGH : LOW);
+  digitalWrite(LED_GREEN_PIN, (bluetoothConnected && isPlaying) ? HIGH : LOW);
+}
+
+// =================================================
 // CONTROLE DE VOLUME
 // =================================================
 
@@ -455,6 +484,12 @@ void setup() {
   pinMode(NEXT_BUTTON_PIN, INPUT_PULLUP);
   pinMode(PREV_BUTTON_PIN, INPUT_PULLUP);
 
+  pinMode(LED_GREEN_PIN, OUTPUT);
+  pinMode(LED_YELLOW_PIN, OUTPUT);
+  pinMode(LED_RED_PIN, OUTPUT);
+
+  updateLeds();
+
   // -----------------------------------------------
   // POTENCIOMETRO
   // -----------------------------------------------
@@ -465,29 +500,56 @@ void setup() {
   // OLED
   // -----------------------------------------------
 
-  Wire.begin(OLED_SDA, OLED_SCL);
-
-  if (!display.begin(
-    SSD1306_SWITCHCAPVCC,
-    OLED_ADDRESS
-  )) {
-
-    Serial.println("ERRO: OLED nao encontrado!");
-
-    while (true) {
-      delay(1000);
+  auto scanI2C = [&]() -> bool {
+    bool found = false;
+    Serial.println("Escaneando I2C...");
+    for (uint8_t addr = 1; addr < 127; addr++) {
+      Wire.beginTransmission(addr);
+      if (Wire.endTransmission() == 0) {
+        Serial.printf("Dispositivo I2C encontrado: 0x%02X\n", addr);
+        found = true;
+      }
     }
+    if (!found) {
+      Serial.println("Nenhum dispositivo I2C encontrado.");
+    }
+    return found;
+  };
+
+  Wire.begin(OLED_SDA, OLED_SCL);
+  bool foundDevice = scanI2C();
+
+  // Se nada for encontrado, tenta inverter SDA/SCL
+  if (!foundDevice) {
+    Serial.println("Tentando inverter SDA/SCL...");
+    Wire.begin(OLED_SCL, OLED_SDA);
+    foundDevice = scanI2C();
   }
 
-  display.clearDisplay();
+  // Tenta enderecos comuns do SSD1306
+  if (display.begin(SSD1306_SWITCHCAPVCC, 0x3C)) {
+    oledAvailable = true;
+  } else if (display.begin(SSD1306_SWITCHCAPVCC, 0x3D)) {
+    oledAvailable = true;
+  }
 
-  display.setTextSize(1);
-  display.setTextColor(SSD1306_WHITE);
+  if (!oledAvailable) {
+    Serial.println("ERRO: OLED nao encontrado!");
+  } else {
+    Serial.println("OLED iniciado com sucesso!");
+  }
 
-  display.setCursor(10, 25);
-  display.println("Iniciando sistema...");
+  if (oledAvailable) {
+    display.clearDisplay();
 
-  display.display();
+    display.setTextSize(1);
+    display.setTextColor(SSD1306_WHITE);
+
+    display.setCursor(10, 25);
+    display.println("Iniciando sistema...");
+
+    display.display();
+  }
 
   // -----------------------------------------------
   // I2S
@@ -513,10 +575,12 @@ void setup() {
 
     Serial.println("ERRO AO INICIAR I2S!");
 
-    display.clearDisplay();
-    display.setCursor(0, 25);
-    display.println("ERRO I2S!");
-    display.display();
+    if (oledAvailable) {
+      display.clearDisplay();
+      display.setCursor(0, 25);
+      display.println("ERRO I2S!");
+      display.display();
+    }
 
     while (true) {
       delay(1000);
@@ -559,21 +623,16 @@ void setup() {
 
   Serial.println("Iniciando Bluetooth A2DP...");
 
+  a2dp_sink.activate_pin_code(true);
+  a2dp_sink.set_on_pin_code_request(pinCodeCallback);
+
   // O I2SClass sera utilizado como saida de audio.
   // Nao desativar set_output_active!
 
   a2dp_sink.start("ESP32 MUSIC PLAYER");
 
-  a2dp_sink.set_volume(80);
-
   Serial.println("Bluetooth aguardando conexao!");
 
-  display.clearDisplay();
-  display.setCursor(0, 20);
-  display.println("TESTE DISPLAY");
-  display.println("ESP32 MUSIC PLAYER");
-  display.display();
-  delay(2000);
 }
 
 // =================================================
@@ -662,6 +721,10 @@ void loop() {
   // VOLUME
 
   updateVolume();
+
+  // LEDS
+
+  updateLeds();
 
   // OLED
 

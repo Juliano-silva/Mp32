@@ -8,7 +8,7 @@
 #define OLED_RESET -1
 #define OLED_ADDRESS 0x3C
 
-#define OLED_SDA 25
+#define OLED_SDA 13
 #define OLED_SCL 14
 
 // I2S - AMPLIFICADOR
@@ -17,11 +17,11 @@
 #define I2S_DOUT 19
 
 // Controlador dos botões
-#define BUTTON_PIN      13
+#define BUTTON_PIN      25
 #define NEXT_BUTTON_PIN 26
 #define PREV_BUTTON_PIN 27
 
-#define VOLUME_POT_PIN 17
+#define VOLUME_POT_PIN 34
 
 // LEDs
 #define LED_GREEN_PIN   2
